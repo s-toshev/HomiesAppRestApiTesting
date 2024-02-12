@@ -1,4 +1,5 @@
 using Homies.Data;
+using Homies.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,6 +27,8 @@ builder.Services.ConfigureApplicationCookie(options =>
 {
     options.LoginPath = "/Identity/Account/Login";
 });
+
+builder.Services.AddScoped<IEventService, EventService>();
 
 var app = builder.Build();
 

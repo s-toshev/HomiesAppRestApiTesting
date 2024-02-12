@@ -7,25 +7,22 @@ namespace Homies.Data
 {
     public class HomiesDbContext : IdentityDbContext
     {
+        public HomiesDbContext()
+        {
+            
+        }
         public HomiesDbContext(DbContextOptions<HomiesDbContext> options)
             : base(options)
         {
 
         }
 
-        public DbSet<Type> Types { get; set; }
-        public DbSet<Event> Events { get; set; }
-        public DbSet<EventParticipant> EventsParticipants { get; set; }
+        public virtual DbSet<Type> Types { get; set; }
+        public virtual DbSet<Event> Events { get; set; }
+        public virtual DbSet<EventParticipant> EventsParticipants { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
-            //builder
-            //    .Entity<Event>()
-            //    .HasOne(e => e.Type)
-            //    .WithMany(t => t.Events)
-            //    .HasForeignKey(t => t.TypeId)
-            //    .OnDelete(DeleteBehavior.NoAction);
-
             modelBuilder.Entity<EventParticipant>()
                 .HasKey(e => new { e.HelperId, e.EventId });
 
@@ -65,6 +62,11 @@ namespace Homies.Data
                 });
 
             base.OnModelCreating(modelBuilder);
+        }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            base.OnConfiguring(optionsBuilder);
         }
     }
 }

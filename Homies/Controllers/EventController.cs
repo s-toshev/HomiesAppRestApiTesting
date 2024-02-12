@@ -2,6 +2,7 @@
 using Homies.Data.Models;
 using Homies.Models.Event;
 using Homies.Models.Type;
+using Homies.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,19 +13,18 @@ namespace Homies.Controllers
     [Authorize]
     public class EventController : Controller
     {
+        private readonly IEventService _eventService;
 
-        private readonly HomiesDbContext _data;
-
-        public EventController(HomiesDbContext data)
+        public EventController(IEventService eventService)
         {
-            _data = data;
+            _eventService = eventService;
         }
 
         public async Task<IActionResult> Add()
         {
             EventFormModel eventModel = new EventFormModel()
             {
-                Types = GetTypes()
+                Types = await GetTypes()
             };
 
             return View(eventModel);
@@ -33,7 +33,9 @@ namespace Homies.Controllers
         [HttpPost]
         public async Task<IActionResult> Add(EventFormModel eventModel)
         {
-            if (!GetTypes().Any(e => e.Id == eventModel.TypeId))
+            var eventTypes = await GetTypes();
+
+            if (!eventTypes.Any(e => e.Id == eventModel.TypeId))
             {
                 ModelState.AddModelError(nameof(eventModel.TypeId), "Type does not exist!");
             }
@@ -45,85 +47,50 @@ namespace Homies.Controllers
 
             string currentUserId = GetUserId();
 
-            var eventToAdd = new Event()
-            {
-                Name = eventModel.Name,
-                Description = eventModel.Description,
-                CreatedOn = DateTime.Now,
-                TypeId = eventModel.TypeId,
-                OrganiserId = currentUserId,
-                Start = eventModel.Start,
-                End = eventModel.End
-            };
-
-            await _data.Events.AddAsync(eventToAdd);
-            await _data.SaveChangesAsync();
+            await _eventService.AddEventAsync(eventModel, currentUserId);
 
             return RedirectToAction("All", "Event");
         }
 
         public async Task<IActionResult> All()
         {
-            var eventsToDisplay = await _data
-                .Events
-                .Select(e => new EventViewShortModel()
-                {
-                    Id = e.Id,
-                    Name = e.Name,
-                    Start = e.Start.ToString("dd/MM/yyyy H:mm"),
-                    Type = e.Type.Name,
-                    Organiser = e.Organiser.UserName
-                })
-                .ToListAsync();
+            var eventsToDisplay = await _eventService.GetAllEventsAsync();
 
             return View(eventsToDisplay);
         }
 
         public async Task<IActionResult> Join(int id)
         {
-            var eventToAdd = await _data
-                .Events
-                .FindAsync(id);
-
-            if (eventToAdd == null)
-            {
-                return BadRequest();
-            }
 
             string currentUserId = GetUserId();
 
-            var entry = new EventParticipant()
-            {
-                EventId = eventToAdd.Id,
-                HelperId = currentUserId,
-            };
+            bool isAlreadyJoined = await _eventService.IsUserJoinedEventAsync(id, currentUserId);
 
-            if (await _data.EventsParticipants.ContainsAsync(entry))
+            if (isAlreadyJoined)
             {
                 return RedirectToAction("Joined", "Event");
             }
 
-            await _data.EventsParticipants.AddAsync(entry);
-            await _data.SaveChangesAsync();
+            bool result = await _eventService.JoinEventAsync(id, currentUserId);
+
+            if (!result)
+            {
+                return BadRequest();
+            }
 
             return RedirectToAction("Joined", "Event");
         }
 
         public async Task<IActionResult> Leave(int id)
         {
-            var eventId = id;
             var currentUser = GetUserId();
 
-            var eventToLeave = _data.Events.FindAsync(eventId);
+            bool result = await _eventService.LeaveEventAsync(id, currentUser);
 
-            if (eventToLeave == null)
+            if (!result)
             {
                 return BadRequest();
             }
-
-            var entry = await _data.EventsParticipants.FirstOrDefaultAsync(ep => ep.HelperId == currentUser && ep.EventId == eventId);
-            _data.EventsParticipants.Remove(entry);
-            await _data.SaveChangesAsync();
 
             return RedirectToAction("All", "Event");
         }
@@ -132,38 +99,14 @@ namespace Homies.Controllers
         {
             string currentUserId = GetUserId();
 
-            var userEvents = await _data
-                .EventsParticipants
-                .Where(ep => ep.HelperId == currentUserId)
-                .Select(ep => new EventViewShortModel()
-                {
-                    Id = ep.Event.Id,
-                    Name = ep.Event.Name,
-                    Start = ep.Event.Start.ToString("dd/MM/yyyy H:mm"),
-                    Type = ep.Event.Type.Name
-                })
-                .ToListAsync();
+            var userEvents = await _eventService.GetUserJoinedEventsAsync(currentUserId);
 
             return View(userEvents);
         }
 
         public async Task<IActionResult> Details(int id)
         {
-            var eventToDisplay = await _data
-               .Events
-               .Where(e => e.Id == id)
-               .Select(e => new EventViewDetailsModel()
-               {
-                   Id = e.Id,
-                   Name = e.Name,
-                   Start = e.Start.ToString("dd/MM/yyyy H:mm"),
-                   End = e.End.ToString("dd/MM/yyyy H:mm"),
-                   Organiser = e.Organiser.UserName,
-                   Type = e.Type.Name,
-                   Description = e.Description,
-                   CreatedOn = e.CreatedOn.ToString("dd/MM/yyyy H:mm")
-               })
-               .FirstOrDefaultAsync();
+            var eventToDisplay = await _eventService.GetEventDetailsAsync(id);
 
             if (eventToDisplay == null)
             {
@@ -175,71 +118,57 @@ namespace Homies.Controllers
 
         public async Task<IActionResult> Edit(int id)
         {
-            var eventToEdit = await _data.Events.FindAsync(id);
+            var eventModel = await _eventService.GetEventForEditAsync(id);
 
-            if (eventToEdit == null)
+            if (eventModel == null)
             {
                 return BadRequest();
             }
 
             string currentUserId = GetUserId();
-            if (currentUserId != eventToEdit.OrganiserId)
+            string eventOrganiserId = await _eventService.GetEventOrganizerIdAsync(id);
+
+            if (currentUserId != eventOrganiserId)
             {
                 return Unauthorized();
             }
-
-            EventFormModel eventModel = new EventFormModel()
-            {
-                Name = eventToEdit.Name,
-                Description = eventToEdit.Description,
-                Start = eventToEdit.Start,
-                End = eventToEdit.End,
-                TypeId = eventToEdit.TypeId,
-                Types = GetTypes()
-            };
 
             return View(eventModel);
         }
 
+
         [HttpPost]
         public async Task<IActionResult> Edit(int id, EventFormModel model)
         {
-            var eventToEdit = await _data.Events.FindAsync(id);
+            string currentUserId = GetUserId();
+            string eventOrganiserId = await _eventService.GetEventOrganizerIdAsync(id);
 
-            if (eventToEdit == null)
-            {
-                return BadRequest();
-            }
-
-            string currentUser = GetUserId();
-            if(currentUser != eventToEdit.OrganiserId) 
+            if (currentUserId != eventOrganiserId)
             {
                 return Unauthorized();
             }
 
-            if(!GetTypes().Any(e => e.Id == model.TypeId))
+            bool result = await _eventService.UpdateEventAsync(id, model, currentUserId);
+
+            if (result)
             {
-                ModelState.AddModelError(nameof(model.TypeId), "Type does not exist!");
+                return RedirectToAction("All", "Event");
             }
-
-            eventToEdit.Name = model.Name;
-            eventToEdit.Description = model.Description;
-            eventToEdit.Start = model.Start;
-            eventToEdit.End = model.End;
-            eventToEdit.TypeId = model.TypeId;
-
-            await _data.SaveChangesAsync();
-            return RedirectToAction("All", "Event");
+            else
+            {
+                return BadRequest();
+            }
         }
 
-        private IEnumerable<TypeViewModel> GetTypes()
-            => _data
-                .Types
-                .Select(t => new TypeViewModel()
-                {
-                    Id = t.Id,
-                    Name = t.Name
-                });
+        private async Task<IEnumerable<TypeViewModel>> GetTypes()
+        {
+            var types = await _eventService.GetAllTypesAsync();
+            return types.Select(t => new TypeViewModel
+            {
+                Id = t.Id,
+                Name = t.Name
+            });
+        }
 
         private string GetUserId()
            => User.FindFirstValue(ClaimTypes.NameIdentifier);
